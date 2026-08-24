@@ -209,6 +209,22 @@
   .cat-row .cat-amt.green { color: var(--green); }
   .cat-row .cat-amt.red { color: var(--red); }
   .cat-row .cat-amt.white { color: var(--white); }
+
+  /* 年度备注统计 */
+  .year-rank { margin-top: 4px; }
+  .rank-row { margin-bottom: 10px; }
+  .rank-row:last-child { margin-bottom: 0; }
+  .rank-top { display: flex; align-items: baseline; margin-bottom: 4px; }
+  .rank-top .rank-name { flex: 1; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rank-top .rank-count { font-size: 12px; color: var(--muted); margin-right: 10px; }
+  .rank-top .rank-amt { font-size: 15px; font-weight: 700; }
+  .rank-top .rank-amt.green { color: var(--green); }
+  .rank-top .rank-amt.red { color: var(--red); }
+  .rank-top .rank-amt.white { color: var(--white); }
+  .rank-bar { height: 6px; border-radius: 3px; background: rgba(255,255,255,0.08); overflow: hidden; }
+  .rank-bar .fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width .3s; }
+  .rank-bar .fill.green { background: var(--green); }
+  .rank-bar .fill.red { background: var(--red); }
 </style>
 </head>
 <body>
@@ -281,6 +297,22 @@
       <button id="importBtn" style="flex:1; padding:10px; border:1px solid var(--glass-border); border-radius:10px; background:rgba(255,255,255,0.08); color:var(--text); font-size:13px; cursor:pointer;">⬆ 导入数据</button>
       <input type="file" id="importFile" accept=".json" style="display:none;">
     </div>
+  </div>
+
+  <!-- 年度备注统计 -->
+  <div class="chart-panel">
+    <h3>📈 年度备注统计</h3>
+    <div class="yoy-mom" style="margin-top:0;">
+      <div class="box">
+        <div class="lbl">年度总笔数</div>
+        <div class="val" id="yearRankCount">0</div>
+      </div>
+      <div class="box">
+        <div class="lbl">分类数</div>
+        <div class="val" id="yearRankCat">0</div>
+      </div>
+    </div>
+    <div class="year-rank" id="yearRankBox" style="margin-top:12px;"></div>
   </div>
 
   <!-- 统计面板 -->
@@ -390,6 +422,12 @@
     let t = 0;
     Object.keys(data).forEach(k=>{ if(k.startsWith(y+'-'+String(m).padStart(2,'0'))) t += dayTotal(k); });
     return t;
+  }
+
+  function monthCount(y, m){
+    let c = 0;
+    Object.keys(data).forEach(k=>{ if(k.startsWith(y+'-'+String(m).padStart(2,'0'))) c += (data[k]||[]).length; });
+    return c;
   }
 
   function pctText(cur, prev){
@@ -511,7 +549,7 @@
     document.getElementById('inputName').value='';
     document.getElementById('inputMoney').value='';
     document.getElementById('inputNote').value='';
-    renderCalendar(); renderDetail(); updateStats(); renderChart(); initHistorySelects(); renderHistory();
+    renderCalendar(); renderDetail(); updateStats(); renderChart(); initHistorySelects(); renderHistory(); renderYearRank();
   }
 
   function editItem(id){
@@ -532,7 +570,7 @@
     if(data[selectedDate].length===0) delete data[selectedDate];
     saveData();
     if(editingId === id){ editingId = null; document.getElementById('addBtn').textContent = '添加'; }
-    renderCalendar(); renderDetail(); updateStats(); renderChart(); renderHistory();
+    renderCalendar(); renderDetail(); updateStats(); renderChart(); renderHistory(); renderYearRank();
   }
 
   // 图表
@@ -540,7 +578,7 @@
     const canvas = document.getElementById('chart');
     const dpr = window.devicePixelRatio || 1;
     const w = canvas.parentElement.clientWidth;
-    const h = 180;
+    const h = chartMode === 'day' ? 220 : 180;
     canvas.width = w * dpr;
     canvas.height = h * dpr;
     canvas.style.width = w+'px';
@@ -574,7 +612,8 @@
 
   function drawLineChart(ctx, w, h, labels, values){
     ctx.clearRect(0,0,w,h);
-    const padL = 40, padR = 10, padT = 15, padB = 25;
+    const isDay = (chartMode === 'day');
+    const padL = 40, padR = 10, padT = isDay ? 20 : 15, padB = 25;
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
     const maxV = Math.max(...values, 1);
@@ -591,45 +630,81 @@
       ctx.fillText(fmtShort(maxV*(1-i/4)), padL-4, y+3);
     }
 
-    // 折线
     const n = values.length;
     const stepX = n>1 ? plotW/(n-1) : plotW;
-    ctx.strokeStyle = '#0a84ff';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    values.forEach((v,i)=>{
-      const x = padL + i*stepX;
-      const y = padT + plotH*(1 - v/maxV);
-      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
-    });
-    ctx.stroke();
+    const px = i => padL + i*stepX;
+    const py = v => padT + plotH*(1 - v/maxV);
 
     // 渐变填充
     const grad = ctx.createLinearGradient(0,padT,0,padT+plotH);
     grad.addColorStop(0,'rgba(10,132,255,0.3)');
     grad.addColorStop(1,'rgba(10,132,255,0)');
-    ctx.lineTo(padL+(n-1)*stepX, padT+plotH);
-    ctx.lineTo(padL, padT+plotH);
+    ctx.beginPath();
+    values.forEach((v,i)=>{
+      const x = px(i), y = py(v);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.lineTo(px(n-1), padT+plotH);
+    ctx.lineTo(px(0), padT+plotH);
     ctx.closePath();
     ctx.fillStyle = grad;
     ctx.fill();
 
-    // 数据点
+    // 折线（发光 + 加粗）
+    ctx.save();
+    ctx.strokeStyle = '#0a84ff';
+    ctx.lineWidth = isDay ? 2.5 : 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    ctx.shadowColor = 'rgba(10,132,255,0.7)';
+    ctx.shadowBlur = isDay ? 8 : 4;
+    ctx.beginPath();
     values.forEach((v,i)=>{
-      const x = padL + i*stepX;
-      const y = padT + plotH*(1 - v/maxV);
-      ctx.fillStyle = '#0a84ff';
-      ctx.beginPath(); ctx.arc(x,y,2.5,0,Math.PI*2); ctx.fill();
+      const x = px(i), y = py(v);
+      if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    });
+    ctx.stroke();
+    ctx.restore();
+
+    // 数据点：有数据高亮，无数据弱化
+    values.forEach((v,i)=>{
+      const x = px(i), y = py(v);
+      if(v > 0){
+        // 外圈光晕
+        ctx.fillStyle = 'rgba(10,132,255,0.25)';
+        ctx.beginPath(); ctx.arc(x,y, isDay?6:4, 0, Math.PI*2); ctx.fill();
+        // 实心点
+        ctx.fillStyle = '#0a84ff';
+        ctx.beginPath(); ctx.arc(x,y, isDay?3.5:2.5, 0, Math.PI*2); ctx.fill();
+        // 白心
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(x,y, isDay?1.5:1, 0, Math.PI*2); ctx.fill();
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.18)';
+        ctx.beginPath(); ctx.arc(x,y, 1.5, 0, Math.PI*2); ctx.fill();
+      }
     });
 
-    // X轴标签（稀疏显示）
+    // 日趋势：在数据点上方标注金额
+    if(isDay){
+      ctx.font = '9px -apple-system, sans-serif';
+      ctx.textAlign = 'center';
+      values.forEach((v,i)=>{
+        if(v <= 0) return;
+        const x = px(i), y = py(v);
+        ctx.fillStyle = '#f2f2f7';
+        ctx.fillText(fmtShort(v), x, y - 8);
+      });
+    }
+
+    // X轴标签
     ctx.fillStyle = '#8e8e93';
     ctx.font = '10px -apple-system, sans-serif';
     ctx.textAlign = 'center';
-    const labelStep = Math.ceil(n/8);
+    const labelStep = isDay ? Math.max(1, Math.ceil(n/10)) : Math.ceil(n/8);
     labels.forEach((lb,i)=>{
       if(i%labelStep===0 || i===n-1){
-        ctx.fillText(lb, padL+i*stepX, h-8);
+        ctx.fillText(lb, px(i), h-8);
       }
     });
   }
@@ -666,6 +741,9 @@
       ySel.appendChild(opt);
     });
     mSel.innerHTML = '';
+    const allOpt = document.createElement('option');
+    allOpt.value = '0'; allOpt.textContent = '全年';
+    mSel.appendChild(allOpt);
     for(let m=1; m<=12; m++){
       const opt = document.createElement('option');
       opt.value = m; opt.textContent = m+'月';
@@ -675,37 +753,54 @@
   }
 
   function renderHistory(){
-    const mTotal = monthTotal(historyYear, historyMonth);
+    const isYear = (historyMonth === 0);
+    const mTotal = isYear ? 0 : monthTotal(historyYear, historyMonth);
     let yTotal = 0;
     Object.keys(data).forEach(k=>{ if(k.startsWith(historyYear+'-')) yTotal += dayTotal(k); });
 
     const mEl = document.getElementById('historyMonthTotal');
-    mEl.textContent = fmtMoney(mTotal);
-    mEl.className = 'val ' + dayColor(mTotal);
+    mEl.textContent = isYear ? '全年' : fmtMoney(mTotal);
+    mEl.className = 'val ' + (isYear ? 'white' : dayColor(mTotal));
     const yEl = document.getElementById('historyYearTotal');
     yEl.textContent = fmtMoney(yTotal);
     yEl.className = 'val ' + dayColor(yTotal);
 
-    // 该月每天明细
+    // 该月/全年每天明细
     const box = document.getElementById('historyMonthDays');
     box.innerHTML = '';
-    const daysInMonth = new Date(historyYear, historyMonth, 0).getDate();
     let hasData = false;
-    for(let d=1; d<=daysInMonth; d++){
-      const ds = fmtDate(historyYear, historyMonth, d);
-      const items = data[ds] || [];
-      if(items.length === 0) continue;
-      hasData = true;
-      const total = dayTotal(ds);
-      const div = document.createElement('div');
-      div.className = 'history-day';
-      div.innerHTML = '<div class="d">'+historyMonth+'/'+d+'日</div>' +
-        '<div class="cnt">'+items.length+'笔</div>' +
-        '<div class="amt '+dayColor(total)+'">'+fmtMoney(total)+'</div>';
-      box.appendChild(div);
+    if(isYear){
+      // 全年：按月份汇总展示，每月一行
+      for(let m=1; m<=12; m++){
+        const mt = monthTotal(historyYear, m);
+        const cnt = monthCount(historyYear, m);
+        if(cnt === 0) continue;
+        hasData = true;
+        const div = document.createElement('div');
+        div.className = 'history-day';
+        div.innerHTML = '<div class="d">'+m+'月</div>' +
+          '<div class="cnt">'+cnt+'笔</div>' +
+          '<div class="amt '+dayColor(mt)+'">'+fmtMoney(mt)+'</div>';
+        box.appendChild(div);
+      }
+    } else {
+      const daysInMonth = new Date(historyYear, historyMonth, 0).getDate();
+      for(let d=1; d<=daysInMonth; d++){
+        const ds = fmtDate(historyYear, historyMonth, d);
+        const items = data[ds] || [];
+        if(items.length === 0) continue;
+        hasData = true;
+        const total = dayTotal(ds);
+        const div = document.createElement('div');
+        div.className = 'history-day';
+        div.innerHTML = '<div class="d">'+historyMonth+'/'+d+'日</div>' +
+          '<div class="cnt">'+items.length+'笔</div>' +
+          '<div class="amt '+dayColor(total)+'">'+fmtMoney(total)+'</div>';
+        box.appendChild(div);
+      }
     }
     if(!hasData){
-      box.innerHTML = '<div class="empty-tip">该月暂无记录</div>';
+      box.innerHTML = '<div class="empty-tip">'+(isYear?'该年':'该月')+'暂无记录</div>';
     }
 
     // 按备注/项目名归类汇总
@@ -715,18 +810,25 @@
   function renderCategory(y, m){
     const catBox = document.getElementById('historyCategory');
     catBox.innerHTML = '';
+    const isYear = (m === 0);
     // 归类：备注为空按项目名，有备注按备注
     const catMap = {}; // key -> { total, count }
-    const daysInMonth = new Date(y, m, 0).getDate();
-    for(let d=1; d<=daysInMonth; d++){
-      const ds = fmtDate(y, m, d);
-      const items = data[ds] || [];
-      items.forEach(it=>{
-        const key = (it.note && it.note.trim()) ? it.note.trim() : it.name;
-        if(!catMap[key]) catMap[key] = { total:0, count:0 };
-        catMap[key].total += (Number(it.money)||0);
-        catMap[key].count++;
-      });
+    const daysInMonth = isYear ? 0 : new Date(y, m, 0).getDate();
+    const months = isYear ? 12 : 1;
+    const startM = isYear ? 1 : m;
+    for(let i=0; i<months; i++){
+      const mm = startM + i;
+      const dim = new Date(y, mm, 0).getDate();
+      for(let d=1; d<=dim; d++){
+        const ds = fmtDate(y, mm, d);
+        const items = data[ds] || [];
+        items.forEach(it=>{
+          const key = (it.note && it.note.trim()) ? it.note.trim() : it.name;
+          if(!catMap[key]) catMap[key] = { total:0, count:0 };
+          catMap[key].total += (Number(it.money)||0);
+          catMap[key].count++;
+        });
+      }
     }
     const keys = Object.keys(catMap);
     if(keys.length === 0){
@@ -735,7 +837,7 @@
     }
     // 按总额降序
     keys.sort((a,b)=> catMap[b].total - catMap[a].total);
-    catBox.innerHTML = '<div class="cat-title">📊 按备注分类汇总</div>';
+    catBox.innerHTML = '<div class="cat-title">📊 ' + (isYear?'按备注分类汇总（全年）':'按备注分类汇总') + '</div>';
     keys.forEach(key=>{
       const c = catMap[key];
       const div = document.createElement('div');
@@ -747,9 +849,54 @@
     });
   }
 
+  // 年度备注统计（独立区块，展示当前 viewYear 的备注排行榜）
+  function renderYearRank(){
+    const box = document.getElementById('yearRankBox');
+    const countEl = document.getElementById('yearRankCount');
+    const catEl = document.getElementById('yearRankCat');
+    box.innerHTML = '';
+    const catMap = {};
+    Object.keys(data).forEach(k=>{
+      if(!k.startsWith(viewYear+'-')) return;
+      const items = data[k] || [];
+      items.forEach(it=>{
+        const key = (it.note && it.note.trim()) ? it.note.trim() : it.name;
+        if(!catMap[key]) catMap[key] = { total:0, count:0 };
+        catMap[key].total += (Number(it.money)||0);
+        catMap[key].count++;
+      });
+    });
+    const keys = Object.keys(catMap).sort((a,b)=> catMap[b].total - catMap[a].total);
+    let totalCount = 0;
+    keys.forEach(k=>{ totalCount += catMap[k].count; });
+    countEl.textContent = totalCount + ' 笔';
+    countEl.className = 'val ' + (totalCount>0?'white':'');
+    catEl.textContent = keys.length + ' 类';
+    catEl.className = 'val ' + (keys.length>0?'white':'');
+
+    if(keys.length === 0){
+      box.innerHTML = '<div class="empty-tip">该年暂无记录</div>';
+      return;
+    }
+    const maxTotal = Math.max(...keys.map(k=>Math.abs(catMap[k].total)), 1);
+    keys.forEach(key=>{
+      const c = catMap[key];
+      const pct = Math.max(2, Math.round(Math.abs(c.total) / maxTotal * 100));
+      const row = document.createElement('div');
+      row.className = 'rank-row';
+      row.innerHTML = '<div class="rank-top">' +
+          '<div class="rank-name">'+escapeHtml(key)+'</div>' +
+          '<div class="rank-count">'+c.count+'笔</div>' +
+          '<div class="rank-amt '+dayColor(c.total)+'">'+fmtMoney(c.total)+'</div>' +
+        '</div>' +
+        '<div class="rank-bar"><div class="fill '+dayColor(c.total)+'" style="width:'+pct+'%"></div></div>';
+      box.appendChild(row);
+    });
+  }
+
   // 事件
-  document.getElementById('prevMonth').addEventListener('click', ()=>{ viewMonth--; if(viewMonth<1){viewMonth=12;viewYear--;} renderCalendar(); updateStats(); renderChart(); });
-  document.getElementById('nextMonth').addEventListener('click', ()=>{ viewMonth++; if(viewMonth>12){viewMonth=1;viewYear++;} renderCalendar(); updateStats(); renderChart(); });
+  document.getElementById('prevMonth').addEventListener('click', ()=>{ viewMonth--; if(viewMonth<1){viewMonth=12;viewYear--;} renderCalendar(); updateStats(); renderChart(); renderYearRank(); });
+  document.getElementById('nextMonth').addEventListener('click', ()=>{ viewMonth++; if(viewMonth>12){viewMonth=1;viewYear++;} renderCalendar(); updateStats(); renderChart(); renderYearRank(); });
   document.getElementById('addBtn').addEventListener('click', addItem);
   document.getElementById('inputMoney').addEventListener('keydown', e=>{ if(e.key==='Enter') addItem(); });
   document.getElementById('inputNote').addEventListener('keydown', e=>{ if(e.key==='Enter') addItem(); });
@@ -807,7 +954,7 @@
         }
         data = imported;
         saveData();
-        renderCalendar(); renderDetail(); updateStats(); renderChart(); initHistorySelects(); renderHistory();
+        renderCalendar(); renderDetail(); updateStats(); renderChart(); initHistorySelects(); renderHistory(); renderYearRank();
         alert('导入成功！');
       }catch(err){
         alert('导入失败：文件格式错误');
@@ -824,13 +971,8 @@
   renderDetail();
   updateStats();
   renderChart();
+  renderYearRank();
 })();
-</script>
-<script>
-  // Service Worker 注册（离线缓存）
-  if('serviceWorker' in navigator){
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  }
 </script>
 </body>
 </html>
